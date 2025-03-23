@@ -55,14 +55,16 @@ jobs:
 
       - name: Remove conflicting Docker packages
         run: |
-          # Clean up and reset package lists to avoid conflicts
-          sudo apt-get update
-          sudo apt-get remove -y containerd containerd.io docker docker-engine docker.io
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
+          # Remove any pre-installed Docker or containerd packages
+          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
 
-          # Ensure any held packages are not blocking installs
+          # Clean up the package system and fix any broken dependencies
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          sudo apt-get update --fix-missing
+          sudo apt-get install -f
+
+          # Ensure no held packages block installation
           sudo apt-mark unhold containerd containerd.io docker docker-engine docker.io
 
       - name: Install Docker
@@ -81,7 +83,7 @@ jobs:
           # Add Docker's stable repository
           sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
-          # Update the package list
+          # Update the package list again
           sudo apt-get update
 
           # Install Docker and containerd
