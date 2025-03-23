@@ -55,14 +55,19 @@ jobs:
 
       - name: Remove conflicting Docker packages
         run: |
+          # Clean up and reset package lists to avoid conflicts
           sudo apt-get update
           sudo apt-get remove -y containerd containerd.io docker docker-engine docker.io
           sudo apt-get autoremove -y
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
 
+          # Ensure any held packages are not blocking installs
+          sudo apt-mark unhold containerd containerd.io docker docker-engine docker.io
+
       - name: Install Docker
         run: |
+          # Install Docker dependencies
           sudo apt-get update
           sudo apt-get install -y \
             apt-transport-https \
@@ -70,12 +75,19 @@ jobs:
             curl \
             software-properties-common
 
+          # Add Docker's official GPG key
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+          # Add Docker's stable repository
           sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
+          # Update the package list
           sudo apt-get update
+
+          # Install Docker and containerd
           sudo apt-get install -y docker-ce docker-ce-cli containerd.io
 
+          # Start Docker service
           sudo systemctl start docker
           sudo systemctl enable docker
 
