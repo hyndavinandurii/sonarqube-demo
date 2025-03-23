@@ -64,13 +64,12 @@ jobs:
           sudo apt-get update --fix-missing
           sudo apt-get install -f
 
-          # Ensure no held packages block installation
-          sudo apt-mark unhold containerd containerd.io docker docker-engine docker.io
-
       - name: Install Docker
         run: |
-          # Install Docker dependencies
-          sudo apt-get update
+          # Ensure no old versions or conflicting Docker packages exist
+          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
+
+          # Install required dependencies
           sudo apt-get install -y \
             apt-transport-https \
             ca-certificates \
@@ -83,10 +82,8 @@ jobs:
           # Add Docker's stable repository
           sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
 
-          # Update the package list again
+          # Update apt and install Docker
           sudo apt-get update
-
-          # Install Docker and containerd
           sudo apt-get install -y docker-ce docker-ce-cli containerd.io
 
           # Start Docker service
