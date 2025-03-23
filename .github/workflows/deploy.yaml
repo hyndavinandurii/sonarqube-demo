@@ -1,6 +1,7 @@
-name: SonarQube-Scan 
+name: SonarQube-Scan and Build Docker Image
 
 on:
+  # Trigger the workflow manually
   workflow_dispatch:
 
 jobs:
@@ -52,7 +53,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Docker
+      - name: Remove conflicting packages (containerd)
+        run: |
+          sudo apt-get remove -y containerd containerd.io
+          sudo apt-get autoremove -y
+
+      - name: Install Docker
         run: |
           sudo apt-get update
           sudo apt-get install -y docker.io
