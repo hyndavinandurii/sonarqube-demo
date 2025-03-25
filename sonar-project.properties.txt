@@ -5,6 +5,7 @@ sonar.projectVersion=1.0
 
 # Source code location
 sonar.sources=.
+sonar.java.binaries=target/classes
 
 # Language and encoding settings
 sonar.language=java
