@@ -1,7 +1,8 @@
-name: SonarQube Scan and Build Spring Boot App
+name: SonarQube-Scan and Build Docker Image
 
 on:
-  workflow_dispatch: # Manually triggered workflow
+  # Trigger the workflow manually
+  workflow_dispatch:
 
 jobs:
   sonarqube:
@@ -12,74 +13,91 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Set up Java 17
+    - name: Set up Java
       uses: actions/setup-java@v2
       with:
         java-version: 17
         distribution: 'adopt'
         architecture: x64
 
-    - name: Install dependencies
-      run: |
-        chmod +x ./mvnw  # Make the Maven wrapper executable
-        ./mvnw clean install  # Use mvnw to install dependencies
-
     - name: Delete SonarQube cache
       run: |
         if [ -d $HOME/.sonar ]; then
           rm -rf $HOME/.sonar
         fi
-
     - name: SonarQube Scan
       run: |
-        # Download and unzip SonarScanner
+        # Download and unzip SonarScanner 5
         curl -sSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.0.2966-linux.zip" -o sonar-scanner.zip
         unzip sonar-scanner.zip -d .        
         # Configure SonarScanner properties (adjust as needed)
         echo "sonar.host.url=${{ secrets.SONAR_HOST_URL }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
         echo "sonar.login=${{ secrets.SONAR_TOKEN }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
-        echo "sonar.projectKey=my-java-app" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
+        echo "sonar.projectKey=test" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
         # Run SonarScanner and handle errors
-        ./sonar-scanner-5.0.0.2966-linux/bin/sonar-scanner
-
+        if ./sonar-scanner-5.0.0.2966-linux/bin/sonar-scanner; then
+          echo "SonarQube analysis completed successfully."
+        else
+          echo "SonarQube analysis failed."
+          exit 1
+        fi
   build:
     name: Build and Dockerize Application
     needs: sonarqube
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-    - name: Set up Docker
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y docker.io
-        sudo systemctl start docker
-        sudo systemctl enable docker
+      - name: Remove conflicting Docker packages
+        run: |
+          # Remove any pre-installed Docker or containerd packages
+          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
+          # Clean up the package system and fix any broken dependencies
+          sudo apt-get clean
+          sudo apt-get autoremove -y
+          sudo apt-get update --fix-missing
+          sudo apt-get install -f
+      - name: Install Docker
+        run: |
+          # Ensure no old versions or conflicting Docker packages exist
+          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
+          # Install required dependencies
+          sudo apt-get install -y \
+            apt-transport-https \
+            ca-certificates \
+            curl \
+            software-properties-common
+          # Add Docker's official GPG key
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+          # Add Docker's stable repository
+          sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+          # Update apt and install Docker
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+          # Start Docker service
+          sudo systemctl start docker
+          sudo systemctl enable docker
+      - name: Check Docker Version
+        run: docker --version
 
-    - name: Check Docker Version
-      run: docker --version
-
-    - name: Build Docker image
-      run: |
-        # Create a Dockerfile for the application (if not already present)
-        echo "FROM openjdk:17-jdk-slim" > Dockerfile
-        echo "COPY target/my-java-app.jar /usr/app/my-java-app.jar" >> Dockerfile
-        echo "CMD [\"java\", \"-jar\", \"/usr/app/my-java-app.jar\"]" >> Dockerfile
-
-        # Build the Docker image
-        docker build -t my-java-app .
-
-    - name: Log in to Docker Hub
-      run: |
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
-
-    - name: Push Docker image to Docker Hub
-      run: |
-        docker tag my-java-app:latest ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
-        docker push ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
-
-    - name: Run Docker container
-      run: |
-        docker run -d -p 8080:8080 --name my-java-container ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
+      - name: Compile Java code and create JAR
+        run: |
+          # Compile your Java code
+          javac HelloWorld.java
+          # Create a JAR file
+          jar cfe HelloWorld.jar HelloWorld HelloWorld.class
+      - name: Build Docker image
+        run: |
+          docker build -t my-java-app .
+      - name: Log in to Docker Hub
+        run: |
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker tag my-java-app:latest ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
+      - name: Run Docker container
+        run: |
+          docker run -d -p 8080:8080 --name my-java-container ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
