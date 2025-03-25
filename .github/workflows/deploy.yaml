@@ -1,103 +1,91 @@
-name: SonarQube-Scan and Build Docker Image
+name: Petclinic CI/CD Pipeline
 
 on:
-  # Trigger the workflow manually
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
-  sonarqube:
-    name: SonarQube Trigger
+  checkout:
+    name: Checkout Code
     runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-
-    - name: Set up Java
-      uses: actions/setup-java@v2
-      with:
-        java-version: 17
-        distribution: 'adopt'
-        architecture: x64
-
-    - name: Delete SonarQube cache
-      run: |
-        if [ -d $HOME/.sonar ]; then
-          rm -rf $HOME/.sonar
-        fi
-    - name: SonarQube Scan
-      run: |
-        # Download and unzip SonarScanner 5
-        curl -sSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.0.2966-linux.zip" -o sonar-scanner.zip
-        unzip sonar-scanner.zip -d .        
-        # Configure SonarScanner properties (adjust as needed)
-        echo "sonar.host.url=${{ secrets.SONAR_HOST_URL }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
-        echo "sonar.login=${{ secrets.SONAR_TOKEN }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
-        echo "sonar.projectKey=test" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
-        # Run SonarScanner and handle errors
-        if ./sonar-scanner-5.0.0.2966-linux/bin/sonar-scanner; then
-          echo "SonarQube analysis completed successfully."
-        else
-          echo "SonarQube analysis failed."
-          exit 1
-        fi
-  build:
-    name: Build and Dockerize Application
-    needs: sonarqube
-    runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Remove conflicting Docker packages
-        run: |
-          # Remove any pre-installed Docker or containerd packages
-          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
-          # Clean up the package system and fix any broken dependencies
-          sudo apt-get clean
-          sudo apt-get autoremove -y
-          sudo apt-get update --fix-missing
-          sudo apt-get install -f
-      - name: Install Docker
-        run: |
-          # Ensure no old versions or conflicting Docker packages exist
-          sudo apt-get remove -y docker docker-engine docker.io containerd containerd.io
-          # Install required dependencies
-          sudo apt-get install -y \
-            apt-transport-https \
-            ca-certificates \
-            curl \
-            software-properties-common
-          # Add Docker's official GPG key
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-          # Add Docker's stable repository
-          sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-          # Update apt and install Docker
-          sudo apt-get update
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-          # Start Docker service
-          sudo systemctl start docker
-          sudo systemctl enable docker
-      - name: Check Docker Version
-        run: docker --version
+  compile:
+    name: Compile Code
+    needs: checkout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java
+        uses: actions/setup-java@v2
+        with:
+          java-version: 11
+          distribution: adopt
+          architecture: x64
 
-      - name: Compile Java code and create JAR
+      - name: Compile the project
+        run: mvn clean compile
+
+  test:
+    name: Run Test Cases
+    needs: compile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run tests
+        run: mvn test
+
+  sonarqube:
+    name: SonarQube Analysis
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SonarQube
         run: |
-          # Compile your Java code
-          javac HelloWorld.java
-          # Create a JAR file
-          jar cfe HelloWorld.jar HelloWorld HelloWorld.class
-      - name: Build Docker image
+          curl -sSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.0.2966-linux.zip" -o sonar-scanner.zip
+          unzip sonar-scanner.zip -d .
+          echo "sonar.host.url=${{ secrets.SONAR_HOST_URL }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
+          echo "sonar.login=${{ secrets.SONAR_TOKEN }}" >> sonar-scanner-5.0.0.2966-linux/conf/sonar-scanner.properties
+          ./sonar-scanner-5.0.0.2966-linux/bin/sonar-scanner -Dsonar.projectName=Petclinic -Dsonar.java.binaries=target/classes -Dsonar.projectKey=Petclinic
+
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Package the application
+        run: mvn clean install
+
+  docker-build-push:
+    name: Docker Build & Push
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Docker Hub
+        run: echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+      - name: Build and Tag Docker Image
         run: |
-          docker build -t my-java-app .
-      - name: Log in to Docker Hub
-        run: |
-          echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
-      - name: Push Docker image to Docker Hub
-        run: |
-          docker tag my-java-app:latest ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
-          docker push ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
-      - name: Run Docker container
-        run: |
-          docker run -d -p 8080:8080 --name my-java-container ${{ secrets.DOCKER_USERNAME }}/my-java-app:latest
+          docker build -t image1 .
+          docker tag image1 ${{ secrets.DOCKER_USERNAME }}/pet-clinic123:latest
+
+      - name: Push Docker Image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/pet-clinic123:latest
+
+  trivy:
+    name: Run Trivy Scan
+    needs: docker-build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trivy Scan
+        run: trivy image ${{ secrets.DOCKER_USERNAME }}/pet-clinic123:latest
+
+  deploy:
+    name: Deploy Application to Tomcat
+    needs: trivy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy WAR File
+        run: cp ./target/petclinic.war /opt/apache-tomcat-9.0.65/webapps/
